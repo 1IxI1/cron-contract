@@ -1,30 +1,29 @@
 // simple counter contract in Tolk language
 
-const OP_INCREASE = 0x7e8764ef;  // arbitrary 32-bit number, equal to OP_INCREASE in wrappers/CounterContract.ts
+const OP_INCREASE = 0x1e8764ef;
 
 // storage variables
 
-// id is required to be able to create different instances of counters
-// since addresses in TON depend on the initial state of the contract
-global ctxID: int;
+global ctxLastUpdate: int;
 global ctxCounter: int;
+global ctxOwner: slice;
 
 // loadData populates storage variables from persistent storage
 fun loadData() {
     var ds = getContractData().beginParse();
 
-    ctxID = ds.loadUint(32);
+    ctxLastUpdate = ds.loadUint(32);
     ctxCounter = ds.loadUint(32);
-
-    ds.assertEndOfSlice();
+    ctxOwner = ds.loadAddress();
 }
 
 // saveData stores storage variables as a cell into persistent storage
 fun saveData() {
     setContractData(
         beginCell()
-        .storeUint(ctxID, 32)
+        .storeUint(ctxLastUpdate, 32)
         .storeUint(ctxCounter, 32)
+        .storeSlice(ctxOwner)
         .endCell()
     );
 }
@@ -43,28 +42,32 @@ fun onInternalMessage(myBalance: int, msgValue: int, msgFull: cell, msgBody: sli
 
     loadData(); // here we populate the storage variables
 
-    val op = msgBody.loadMessageOp(); // by convention, the first 32 bits of incoming message is the op
-    val queryID = msgBody.loadMessageQueryId(); // also by convention, the next 64 bits contain the "query id", although this is not always the case
+    var sender: slice = cs.loadAddress();
+
+    if (addressIsNone(ctxOwner)) {
+        ctxOwner = sender;
+    } else {
+        assert(isSliceBitsEqual(ctxOwner, sender), 403);
+    }
+
+    val op = msgBody.loadMessageOp();
 
     if (op == OP_INCREASE) {
-        val increaseBy = msgBody.loadUint(32);
-        ctxCounter += increaseBy;
+        ctxCounter += 1;
+        ctxLastUpdate = now();
         saveData();
         return;
     }
 
-    throw 0xffff; // if the message contains an op that is not known to this contract, we throw
+    throw 0xffff;
 }
-
-// get methods are a means to conveniently read contract data using, for example, HTTP APIs
-// note that unlike in many other smart contract VMs, get methods cannot be called by other contracts
 
 get currentCounter(): int {
     loadData();
     return ctxCounter;
 }
 
-get initialId(): int {
+get updatedAt(): int {
     loadData();
-    return ctxID;
+    return ctxLastUpdate;
 }

@@ -15,7 +15,6 @@ const OP_TRIGGER = "op::cron_trigger addr:addr"c;
 const OP_REWARD = "op::cron_trigger_reward"c;
 const OP_INIT = "op::cron_init"c;
 const OP_NOTIFY = "op::cron_notify"c;
-const OP_DESTROY = "op::cron_destroy"c;
 const OP_DESTROYED = "op::cron_destroyed"c;
 const OP_TOPUP = "op::cron_topup"c;
 
@@ -88,25 +87,35 @@ fun onInternalMessage(msgValue: int, msgFull: cell, msgBody: slice) {
 
         // we need it to allow providers to add us back to list when balance is enough for trigger
         notifyDiscoveryContract();
-    } else if (op == OP_DESTROY) {
-        assert(isSliceBitsEqual(sender, ctxOwnerAddress), 403);
 
-        notifyDiscoveryContract();
+        return;
+    } else if (op == 0) {
+        if (msgBody.getRemainingBitsCount() == 8*7) {
+            if (isSliceBitsEqual(msgBody.preloadBits(8 * 7), "destroy")) {
+                assert(isSliceBitsEqual(sender, ctxOwnerAddress), 403);
 
-        // send whole balance back to owner and destroy
-        sendMessage(beginCell()
-            .storeUint(0x10, 6) // non bouncable
-            .storeSlice(ctxOwnerAddress)
-            .storeCoins(0)
-            .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-            .storeUint(OP_DESTROYED, 32)
-            .endCell(), 128 + 32);
-    } else if (op != 0) {
-        // not simple transfer
-        throw 400;
-    } else if (msgValue >= MIN_AMOUNT_FOR_NOTIFY) {
-        notifyDiscoveryContract();
+                notifyDiscoveryContract();
+
+                sendMessage(beginCell()
+                .storeUint(0x10, 6) // non bouncable
+                .storeSlice(ctxOwnerAddress)
+                .storeCoins(0)
+                .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                .storeUint(OP_DESTROYED, 32)
+                .endCell(), 128 + 32);
+
+                return;
+            }
+        }
+
+        if (msgValue >= MIN_AMOUNT_FOR_NOTIFY) {
+            notifyDiscoveryContract();
+        }
+
+        return;
     }
+
+    throw 0xffff;
 }
 
 @inline
@@ -118,13 +127,14 @@ fun verifyTriggerMessage(msg: cell) {
     assert(data.loadAddress().getRemainingBitsCount() == 267, 101);
     data.loadCoins();
 
-    var bData: int = data.loadUint(1 + 4 + 4 + 64 + 32 + 1 + 1);
+    var bData: int = data.loadUint(1 + 4 + 4 + 64 + 32);
+    assert(bData == 0, 102);
 
-    assert(bData <= 1, 102);
-    if (bData == 1) {
-        data.loadRef();
-        data.assertEndOfSlice();
+    var hasState: int = data.loadBool();
+    if (hasState) {
+        data.loadMaybeRef(); // load either state
     }
+    data.loadMaybeRef(); // load either body
 }
 
 fun notifyDiscoveryContract() {
@@ -153,12 +163,6 @@ fun onExternalMessage(msgBody: slice) {
         ctxNextCallTime = now() + ctxRepeatEvery;
         storeData();
 
-        // commit event even if message fails
-        commitContractDataAndActions();
-
-        // cron message
-        sendMessage(ctxMessage, 1);
-
         if (ctxReward > 0) {
             // reward message
             sendMessage(beginCell()
@@ -167,8 +171,11 @@ fun onExternalMessage(msgBody: slice) {
                 .storeCoins(ctxReward)
                 .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
                 .storeUint(OP_REWARD, 32)
-                .endCell(), 1);
+                .endCell(), 3);
         }
+
+        // cron message
+        sendMessage(ctxMessage, 3);
     }
 }
 
