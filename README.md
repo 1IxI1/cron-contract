@@ -1,5 +1,9 @@
 # cron-contract
 
+⚡️ **Contract deployment UI is available at: https://xssnick.github.io/cron-manifest/ui/**
+
+UI source code is located in `cron-ui` folder of this repo
+
 ## Project structure
 
 -   `contracts` - source code of all the smart contracts of the project and their dependencies.
