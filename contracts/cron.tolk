@@ -18,7 +18,7 @@ const OP_NOTIFY = "op::cron_notify"c;
 const OP_DESTROYED = "op::cron_destroyed"c;
 const OP_TOPUP = "op::cron_topup"c;
 
-const SPECIAL_DISCOVER_ADDR_DATA = 98675648959560348148759362039543711199358132002812427045072106646875415399476;
+const SPECIAL_DISCOVER_ADDR_DATA = "cron discovery contract"c;
 
 const MIN_BALANCE_FOR_INIT = 100000000; // 0.1 TON
 const MIN_AMOUNT_FOR_NOTIFY = 50000000; // 0.05 TON
@@ -59,9 +59,9 @@ fun onInternalMessage(msgValue: int, msgFull: cell, msgBody: slice) {
         return;
     }
 
-    var op: int = msgBody.getRemainingBitsCount() > 0 ? msgBody.loadMessageOp() : 0;
-
     loadData();
+
+    var op: int = msgBody.getRemainingBitsCount() > 0 ? msgBody.loadMessageOp() : 0;
 
     if (op == OP_INIT) {
         assert(!ctxInitialized, 403);
@@ -132,7 +132,13 @@ fun verifyTriggerMessage(msg: cell) {
 
     var hasState: int = data.loadBool();
     if (hasState) {
-        data.loadMaybeRef(); // load either state
+        var stateInitRef: cell = data.loadMaybeRef(); // load either state
+        assert(stateInitRef != null, 103); // state init must be in ref (simplify validation)
+
+        var si: slice = stateInitRef.beginParse();
+        var (bits, refs) = si.getRemainingBitsAndRefsCount();
+        assert((bits == 5) & (refs == 2), 104);
+        assert(si.preloadUint(5) == 6, 105); // only code and data
     }
     data.loadMaybeRef(); // load either body
 }
@@ -179,7 +185,6 @@ fun onExternalMessage(msgBody: slice) {
     }
 }
 
-// commented to make comiled contract shorter (to fit into qr code for deploy)
 get info(): (int, int, int, int) {
     loadData();
     var msg: slice = ctxMessage.beginParse().skipBits(6 + 267);

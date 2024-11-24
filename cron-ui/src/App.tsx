@@ -156,6 +156,8 @@ const App: React.FC = () => {
                     bd.storeUint(1, 1).storeRef(body[0]); // body in ref
 
                     msg = bd.endCell();
+                } else {
+                    reward = "0.005"
                 }
 
                 let data = beginCell()
@@ -248,12 +250,12 @@ const App: React.FC = () => {
                 <h1 style={{ fontSize: '24px', margin: '20px 0' }}>CRON UI</h1>
                 {userFriendlyAddress ? '' : <TonConnectButton />}
                 <p>Deploy your CRON contract on TON blockchain and schedule tasks with ease!</p>
-                <div>
+                {userFriendlyAddress ? <div>
                     <label>
                         Advanced Mode:
                         <input type="checkbox" checked={advancedMode} onChange={() => setAdvancedMode(!advancedMode)} />
                     </label>
-                </div>
+                </div> : ""}
             </header>
             <div style={containerStyle}>
                 {userFriendlyAddress ? (
@@ -266,7 +268,7 @@ const App: React.FC = () => {
                         </div>
                         <div style={rowStyle}>
                             <label htmlFor="amount" style={labelStyle}>
-                                Amount:
+                                Amount Balance:
                             </label>
                             <input
                                 id="amount"
@@ -314,21 +316,21 @@ const App: React.FC = () => {
                                 style={inputStyle}
                             />
                         </div>
-                        <div style={rowStyle}>
-                            <label htmlFor="reward" style={labelStyle}>
-                                Reward:
-                            </label>
-                            <input
-                                id="reward"
-                                type="number"
-                                value={reward}
-                                placeholder="Reward"
-                                style={inputStyle}
-                                onChange={(e) => setReward(e.target.value)}
-                            />
-                        </div>
                         {advancedMode ? (
                             <>
+                                <div style={rowStyle}>
+                                    <label htmlFor="reward" style={labelStyle}>
+                                        Reward:
+                                    </label>
+                                    <input
+                                        id="reward"
+                                        type="number"
+                                        value={reward}
+                                        placeholder="Reward"
+                                        style={inputStyle}
+                                        onChange={(e) => setReward(e.target.value)}
+                                    />
+                                </div>
                                 <button
                                     style={{
                                         backgroundColor: '#0098EA',
@@ -401,7 +403,7 @@ const App: React.FC = () => {
 };
 
 const hexStringCode =
-    'b5ee9c7241021001000270000114ff00f4a413f4bcf2c80b01020120020f020148030e0202cd040d020120050a0201200609026d3b68bb7ec07434c0fe900c005c6c2497c0f80875d2708024c074c7e49c1638bc004860840b9074eb2eb8c080700038c097c0e103fcbc20070800aa10235f03f841f2d193f8276f10821005f5e100bef2e0c8f842c000f2e0c9f843c200f2e0caf84601c705f2e0cbf848c000f2e0ccf849c000f2e0cdf847f003ed4420d765f869f900f868f823f843a0f862f002f00400aa20d749c0388e3fd71d378b764657374726f798c7058e2d31f846c705f2e193f004c8801001cb05f846cf1670fa027001cb6a8210bbe2782101cb1fc98100a0fb0830db31e030915be2820afaf080be92f004dedb31005f3b513434c0007e1874c7c07e18b4c7c07e18f4c7c07e197e80007e193e90007e19b5007e19f4ffc07e1a34c24c3e1a600201200b0c005b321c4072c03e108072c7fe10c072c7fe114072c7fe113e80be11b3c5be11c0733e120072fffe124072c2727b552000533434c148700600b00404ac7cb8193e900075d2604042eebcb8197e800c74da0070003cb819b4800c0c2000a5d64400800e582ba00e5813800e583c1786d1438143828a9ed34d89d34f192d3154d5b18aa9693142046ee3cbde365261a00e5ffb87d013800e5b541086813f7f280e58ffc2400e5fffc2480e584e4b8fd841840041a02c15e003f08fa1020223ae43f40061f04ede21f088254143f085f089f086826100a8f2f001d31f0182102114702dbaf823f842beb08e3cfa4030f800f823f843a0f862f002f84773fb0830f844c2008e1fc8801001cb0501cf16f844fa027001cb6a82102e04891a01cb1fc973fb08309130e29130e2ad8cbc52';
+    'b5ee9c7241021001000276000114ff00f4a413f4bcf2c80b01020120020f020148030e0202cd040d020120050a0201200609026d3b68bb7ec07434c0fe900c005c6c2497c0f83c004875d2708024c074c7e49c16388860840b9074eb2eb8c080700038c097c0e103fcbc20070800aa10235f03f841f2d193f8276f10821005f5e100bef2e0c8f842c000f2e0c9f843c200f2e0caf84601c705f2e0cbf848c000f2e0ccf849c000f2e0cdf847f003ed4420d765f869f900f868f823f843a0f862f002f00400aa20d749c0388e3fd71d378b764657374726f798c7058e2d31f846c705f2e193f004c8801001cb05f846cf1670fa027001cb6a8210bbe2782101cb1fc98100a0fb0830db31e030915be2820afaf080be92f004dedb31005f3b513434c0007e1874c7c07e18b4c7c07e18f4c7c07e197e80007e193e90007e19b5007e19f4ffc07e1a34c24c3e1a600201200b0c005b321c4072c03e108072c7fe10c072c7fe114072c7fe113e80be11b3c5be11c0733e120072fffe124072c2727b552000973434c148700600b00404ac7cb8193e900075d2604042eebcb8197e800c74da0070003cb819b480006387bd010c081bbcb419f40835d2c07001407000ac3cb81a35c2c13001bcb81a644c38a0006dd64400800e582ba00e5813800e583c108383123f200e5ffb87d013800e5b541086813f7f280e58ffc2400e5fffc2480e584e4b8fd841840041a02c15e003f08fa1020223ae43f40061f04ede21f088254143f085f089f086826100a8f2f001d31f0182102114702dbaf823f842beb08e3cfa4030f800f823f843a0f862f002f844c2008e1fc8801001cb0501cf16f844fa027001cb6a82102e04891a01cb1fc973fb08309130e2f84773fb08309130e23b048606';
 const buffer = Buffer.from(hexStringCode, 'hex');
 const code = Cell.fromBoc(buffer);
 
