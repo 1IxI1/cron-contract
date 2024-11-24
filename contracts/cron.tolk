@@ -22,6 +22,7 @@ const SPECIAL_DISCOVER_ADDR_DATA = "cron discovery contract"c;
 
 const MIN_BALANCE_FOR_INIT = 100000000; // 0.1 TON
 const MIN_AMOUNT_FOR_NOTIFY = 50000000; // 0.05 TON
+const DISCOVERY_AMOUNT_FOR_NOTIFY = 1000000; // 0.001 TON
 
 fun loadData() {
     var data: slice = getContractData().beginParse();
@@ -149,7 +150,7 @@ fun notifyDiscoveryContract() {
     sendMessage(beginCell()
         .storeUint(0x10, 6) // non bouncable
         .storeUint(4, 3).storeUint(0, 8).storeUint(SPECIAL_DISCOVER_ADDR_DATA, 256)
-        .storeCoins(0)
+        .storeCoins(DISCOVERY_AMOUNT_FOR_NOTIFY)
         .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
         .storeUint(OP_NOTIFY, 32)
         // we send init data hash to allow contract addr verification without addtional calls
