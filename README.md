@@ -32,7 +32,7 @@ fun calculateStateInit(cronContractCode: cell): cell {
         .storeUint(3600, 32) // every hour
         .storeUint(0, 32) // salt to randomize address
         .storeCoins(5000000) // 0.005 TON reward per trigger
-        .storeSlice(getMyAddress())
+        .storeSlice(getMyAddress()) // cron owner address (who can destroy cron and return money)
         .storeRef(beginCell()
             .storeUint(0x10, 6) // non bouncable
             .storeSlice(getMyAddress()) // address to which cron message will be sent
