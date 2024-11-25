@@ -9,7 +9,7 @@ UI source code is located in `cron-ui` folder of this repo
 You can deploy cron contract from another contract, for example to create a task for trigger itself from time to time.
 
 For this you need to use cron contract initial data as follows:
-```
+```c
 beginCell()
         .storeUint(0, 1)
         .storeUint(0, 32)
@@ -21,6 +21,54 @@ beginCell()
         .storeUint(0, 256)
         .storeUint(0, 10)
     .endCell()
+```
+
+Full Tolk code example that can be used for CRON deployment from another contract:
+```c
+fun calculateStateInit(cronContractCode: cell): cell {
+    var data: cell = beginCell()
+        .storeUint(0, 1)
+        .storeUint(0, 32)
+        .storeUint(3600, 32) // every hour
+        .storeUint(0, 32) // salt to randomize address
+        .storeCoins(5000000) // 0.005 TON reward per trigger
+        .storeSlice(getMyAddress())
+        .storeRef(beginCell()
+            .storeUint(0x10, 6) // non bouncable
+            .storeSlice(getMyAddress())
+            .storeCoins(ctxReward)
+            .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+            .storeUint(OP_CALL_ME_BACK, 32)
+            .endCell())
+        .storeUint(0, 256)
+        .storeUint(0, 10)
+    .endCell();
+
+    return beginCell().storeUint(0, 2).storeDict(cronContractCode).storeDict(data).storeUint(0, 1).endCell();
+}
+
+fun calculateContractAddress(wc: int, stateInit: cell): slice {
+    return beginCell().storeUint(4, 3)
+        .storeInt(wc, 8)
+        .storeUint(cellHash(stateInit), 256)
+        .endCell()
+    .beginParse();
+}
+
+fun deployCron(cronCode: cell, amount: int) {
+    var stateInit: cell = calculateStateInit(cronCode);
+    var addr: slice = calculateContractAddress(0, stateInit);
+    var body: cell = beginCell().storeUint(0x2e41d3ac, 32).endCell(); // cron init opcode
+
+    sendMessage(beginCell()
+        .storeUint(0x18, 6)
+        .storeSlice(addr)
+        .storeCoins(amount)
+        .storeUint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
+        .storeRef(stateInit)
+        .storeRef(body)
+    .endCell(), 1);
+}
 ```
 
 ## Project structure
