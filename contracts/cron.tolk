@@ -149,7 +149,7 @@ fun notifyDiscoveryContract() {
     // our contract without scanning whole chain
     sendMessage(beginCell()
         .storeUint(0x10, 6) // non bouncable
-        .storeUint(4, 3).storeUint(0, 8).storeUint(SPECIAL_DISCOVER_ADDR_DATA, 256)
+        .storeUint(0x400, 11).storeUint(SPECIAL_DISCOVER_ADDR_DATA, 256)
         .storeCoins(DISCOVERY_AMOUNT_FOR_NOTIFY)
         .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
         .storeUint(OP_NOTIFY, 32)
@@ -164,6 +164,8 @@ fun onExternalMessage(msgBody: slice) {
 
     if ((msgBody.loadMessageOp() == OP_TRIGGER) & (now() >= ctxNextCallTime)) {
         var rewardAddr: slice = msgBody.loadAddress();
+        // should be std addr of 0 workchain with no anycast
+        assert(rewardAddr.preloadUint(11) == 0x400, 400);
 
         acceptExternalMessage();
 
@@ -186,7 +188,7 @@ fun onExternalMessage(msgBody: slice) {
     }
 }
 
-get info(): (int, int, int, int) {
+get getCronInfo(): (int, int, int, int) {
     loadData();
     var msg: slice = ctxMessage.beginParse().skipBits(6 + 267);
     var amount: int = msg.loadCoins();

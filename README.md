@@ -4,6 +4,25 @@
 
 UI source code is located in `cron-ui` folder of this repo
 
+#### Deployment by another contract
+
+You can deploy cron contract from another contract, for example to create a task for trigger itself from time to time.
+
+For this you need to use cron contract initial data as follows:
+```
+beginCell()
+        .storeUint(0, 1)
+        .storeUint(0, 32)
+        .storeUint({period in seconds}, 32)
+        .storeUint({any number (salt)}, 32)
+        .storeCoins({reward for providers per call})
+        .storeSlice(getMyAddress())
+        .storeRef({message cell (like for sendMessage)})
+        .storeUint(0, 256)
+        .storeUint(0, 10)
+    .endCell()
+```
+
 ## Project structure
 
 -   `contracts` - source code of all the smart contracts of the project and their dependencies.
