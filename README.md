@@ -38,7 +38,7 @@ fun calculateStateInit(cronContractCode: cell): cell {
             .storeSlice(getMyAddress()) // address to which cron message will be sent
             .storeCoins(30000000) // 0.03 TON for cron message
             .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-            .storeUint(OP_CALL_ME_BACK, 32)
+            .storeUint(OP_CALL_ME_BACK, 32) // any body for message can be used instead of it
             .endCell())
         .storeUint(0, 256)
         .storeUint(0, 10)
