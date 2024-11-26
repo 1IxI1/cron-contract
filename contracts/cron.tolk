@@ -10,21 +10,36 @@ global ctxMessage: cell;
 global ctxInitStateHash: int;
 global ctxInitStateDepth: int;
 
-
-const OP_TRIGGER = "op::cron_trigger addr:addr"c;
-const OP_REWARD = "op::cron_trigger_reward"c;
-const OP_INIT = "op::cron_init"c;
-const OP_NOTIFY = "op::cron_notify"c;
-const OP_DESTROYED = "op::cron_destroyed"c;
-const OP_TOPUP = "op::cron_topup"c;
+const OP_TRIGGER = 0x2114702d; // "op::cron_trigger addr:addr"c;
+const OP_REWARD = 0x2e04891a; // "op::cron_trigger_reward"c;
+const OP_INIT = 0x2e41d3ac; // "op::cron_init"c;
+const OP_NOTIFY = 0xd027efe5; // "op::cron_notify"c;
+const OP_DESTROYED = 0xbbe27821; // "op::cron_destroyed"c;
 
 const SPECIAL_DISCOVER_ADDR_DATA = "cron discovery contract"c;
+
+const ERROR_INVALID_MSG_FLAGS = 100;
+const ERROR_INVALID_MSG_ADDRESS = 101;
+
+const ERROR_NOT_ENOUGH_BALANCE_FOR_INIT = 200;
+const ERROR_INIT_NEXT_CALL_TIME_NOT_ZERO = 201;
+const ERROR_INIT_REPEAT_EVERY_IS_ZERO = 202;
+const ERROR_INIT_SENDER_IS_NOT_OWNER = 203;
+const ERROR_INIT_STATE_HASH_IS_NOT_ZERO = 204;
+const ERROR_INIT_STATE_DEPTH_IS_NOT_ZERO = 205;
+
+const ERROR_INVALID_PROVIDER_ADDRESS = 400;
+const ERROR_ALREADY_INITIALIZED = 403;
+const ERROR_ACCESS_DENIED = 401;
+
+const ERROR_UNSUPPORTED_OPCODE = 0xffff;
+
 
 const MIN_BALANCE_FOR_INIT = 100000000; // 0.1 TON
 const MIN_AMOUNT_FOR_NOTIFY = 50000000; // 0.05 TON
 const DISCOVERY_AMOUNT_FOR_NOTIFY = 1000000; // 0.001 TON
 
-fun loadData() {
+fun loadContractDataToGlobals() {
     var data: slice = getContractData().beginParse();
 
     ctxInitialized = data.loadUint(1);
@@ -38,7 +53,7 @@ fun loadData() {
     ctxInitStateDepth = data.loadUint(10);
 }
 
-fun storeData() {
+fun storeGlobalsToContractData() {
     setContractData(beginCell()
         .storeUint(1, 1)
         .storeUint(ctxNextCallTime, 32)
@@ -60,31 +75,31 @@ fun onInternalMessage(msgValue: int, msgFull: cell, msgBody: slice) {
         return;
     }
 
-    loadData();
+    loadContractDataToGlobals();
 
     var op: int = msgBody.getRemainingBitsCount() > 0 ? msgBody.loadMessageOp() : 0;
 
     if (op == OP_INIT) {
-        assert(!ctxInitialized, 403);
+        assert(!ctxInitialized, ERROR_ALREADY_INITIALIZED);
 
-        assert(getMyOriginalBalance() >= MIN_BALANCE_FOR_INIT, 200);
+        assert(getMyOriginalBalance() >= MIN_BALANCE_FOR_INIT, ERROR_NOT_ENOUGH_BALANCE_FOR_INIT);
 
-        assert(ctxNextCallTime == 0, 201);
-        assert(ctxRepeatEvery > 0, 202);
+        assert(ctxNextCallTime == 0, ERROR_INIT_NEXT_CALL_TIME_NOT_ZERO);
+        assert(ctxRepeatEvery > 0, ERROR_INIT_REPEAT_EVERY_IS_ZERO);
         // we check owner address with sender to avoid
         // external message replacement with owner change attack
-        assert(isSliceBitsEqual(ctxOwnerAddress, sender), 203);
-        assert(ctxInitStateHash == 0, 204);
-        assert(ctxInitStateDepth == 0, 205);
+        assert(isSliceBitsEqual(ctxOwnerAddress, sender), ERROR_INIT_SENDER_IS_NOT_OWNER);
+        assert(ctxInitStateHash == 0, ERROR_INIT_STATE_HASH_IS_NOT_ZERO);
+        assert(ctxInitStateDepth == 0, ERROR_INIT_STATE_DEPTH_IS_NOT_ZERO);
 
-        verifyTriggerMessage(ctxMessage);
+        validateTriggerMessage(ctxMessage);
 
         var data: cell = getContractData();
         ctxInitStateDepth = data.getCellDepth();
         ctxInitStateHash = data.cellHash();
         ctxNextCallTime = now() + ctxRepeatEvery;
 
-        storeData();
+        storeGlobalsToContractData();
 
         // we need it to allow providers to add us back to list when balance is enough for trigger
         notifyDiscoveryContract();
@@ -93,7 +108,7 @@ fun onInternalMessage(msgValue: int, msgFull: cell, msgBody: slice) {
     } else if (op == 0) {
         if (msgBody.getRemainingBitsCount() == 8*7) {
             if (isSliceBitsEqual(msgBody.preloadBits(8 * 7), "destroy")) {
-                assert(isSliceBitsEqual(sender, ctxOwnerAddress), 403);
+                assert(isSliceBitsEqual(sender, ctxOwnerAddress), ERROR_ACCESS_DENIED);
 
                 notifyDiscoveryContract();
 
@@ -116,32 +131,19 @@ fun onInternalMessage(msgValue: int, msgFull: cell, msgBody: slice) {
         return;
     }
 
-    throw 0xffff;
+    throw ERROR_UNSUPPORTED_OPCODE;
 }
 
 @inline
-fun verifyTriggerMessage(msg: cell) {
+fun validateTriggerMessage(msg: cell) {
+    // we do it to validate basic message structure to not corrupt a contract,
+    // because we loading coins amount in get method
     var data: slice = msg.beginParse();
     var flags: int = data.loadUint(6);
 
-    assert((flags == 0x18) | (flags == 0x10), 100);
-    assert(data.loadAddress().getRemainingBitsCount() == 267, 101);
+    assert((flags == 0x18) | (flags == 0x10), ERROR_INVALID_MSG_FLAGS);
+    assert(data.loadAddress().getRemainingBitsCount() == 267, ERROR_INVALID_MSG_ADDRESS);
     data.loadCoins();
-
-    var bData: int = data.loadUint(1 + 4 + 4 + 64 + 32);
-    assert(bData == 0, 102);
-
-    var hasState: int = data.loadBool();
-    if (hasState) {
-        var stateInitRef: cell = data.loadMaybeRef(); // load either state
-        assert(stateInitRef != null, 103); // state init must be in ref (simplify validation)
-
-        var si: slice = stateInitRef.beginParse();
-        var (bits, refs) = si.getRemainingBitsAndRefsCount();
-        assert((bits == 5) & (refs == 2), 104);
-        assert(si.preloadUint(5) == 6, 105); // only code and data
-    }
-    data.loadMaybeRef(); // load either body
 }
 
 fun notifyDiscoveryContract() {
@@ -160,17 +162,17 @@ fun notifyDiscoveryContract() {
 }
 
 fun onExternalMessage(msgBody: slice) {
-    loadData();
+    loadContractDataToGlobals();
 
     if ((msgBody.loadMessageOp() == OP_TRIGGER) & (now() >= ctxNextCallTime)) {
         var rewardAddr: slice = msgBody.loadAddress();
         // should be std addr of 0 workchain with no anycast
-        assert(rewardAddr.preloadUint(11) == 0x400, 400);
+        assert(rewardAddr.preloadUint(11) == 0x400, ERROR_INVALID_PROVIDER_ADDRESS);
 
         acceptExternalMessage();
 
         ctxNextCallTime = now() + ctxRepeatEvery;
-        storeData();
+        storeGlobalsToContractData();
 
         if (ctxReward > 0) {
             // reward message
@@ -188,8 +190,8 @@ fun onExternalMessage(msgBody: slice) {
     }
 }
 
-get getCronInfo(): (int, int, int, int) {
-    loadData();
+get get_cron_info(): (int, int, int, int) {
+    loadContractDataToGlobals();
     var msg: slice = ctxMessage.beginParse().skipBits(6 + 267);
     var amount: int = msg.loadCoins();
 
