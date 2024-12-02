@@ -168,6 +168,8 @@ fun onExternalMessage(msgBody: slice) {
         var rewardAddr: slice = msgBody.loadAddress();
         // should be std addr of 0 workchain with no anycast
         assert(rewardAddr.preloadUint(11) == 0x400, ERROR_INVALID_PROVIDER_ADDRESS);
+        msgBody.loadUint(32); // salt for ls to not ignore external
+        msgBody.assertEndOfSlice();
 
         acceptExternalMessage();
 
