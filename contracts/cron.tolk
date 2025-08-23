@@ -1,26 +1,10 @@
-import "@stdlib/gas-payments.tolk"
+import "@stdlib/gas-payments"
+import "cron-storage"
 
-global ctxInitialized: int;
-global ctxNextCallTime: int;
-global ctxRepeatEvery: int;
-global ctxReward: int;
-global ctxSalt: int;
-global ctxOwnerAddress: slice;
-global ctxMessage: cell;
-global ctxInitStateHash: int;
-global ctxInitStateDepth: int;
-
-const OP_TRIGGER = 0x2114702d; // "op::cron_trigger addr:addr"c;
-const OP_REWARD = 0x2e04891a; // "op::cron_trigger_reward"c;
-const OP_INIT = 0x2e41d3ac; // "op::cron_init"c;
-const OP_NOTIFY = 0xd027efe5; // "op::cron_notify"c;
-const OP_DESTROYED = 0xbbe27821; // "op::cron_destroyed"c;
-
-const SPECIAL_DISCOVER_ADDR_DATA = "cron discovery contract"c;
-
+// Message validation errors (100-199)
 const ERROR_INVALID_MSG_FLAGS = 100;
-const ERROR_INVALID_MSG_ADDRESS = 101;
 
+// Initialization errors (200-299)
 const ERROR_NOT_ENOUGH_BALANCE_FOR_INIT = 200;
 const ERROR_INIT_NEXT_CALL_TIME_NOT_ZERO = 201;
 const ERROR_INIT_REPEAT_EVERY_IS_ZERO = 202;
@@ -28,175 +12,163 @@ const ERROR_INIT_SENDER_IS_NOT_OWNER = 203;
 const ERROR_INIT_STATE_HASH_IS_NOT_ZERO = 204;
 const ERROR_INIT_STATE_DEPTH_IS_NOT_ZERO = 205;
 
+// Authorization errors (400-499)
 const ERROR_INVALID_PROVIDER_ADDRESS = 400;
-const ERROR_ALREADY_INITIALIZED = 403;
 const ERROR_ACCESS_DENIED = 401;
+const ERROR_EARLY_TRIGGER = 402;
+const ERROR_ALREADY_INITIALIZED = 403;
 
+// General errors
 const ERROR_UNSUPPORTED_OPCODE = 0xffff;
 
+// Special addresses
+const SPECIAL_DISCOVER_ADDR = address("0QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcGJH5Lec");
 
-const MIN_BALANCE_FOR_INIT = 100000000; // 0.1 TON
-const MIN_AMOUNT_FOR_NOTIFY = 50000000; // 0.05 TON
-const DISCOVERY_AMOUNT_FOR_NOTIFY = 1000000; // 0.001 TON
+// Financial constants
+const MIN_BALANCE_FOR_INIT = ton("0.1");
+const MIN_AMOUNT_FOR_NOTIFY = ton("0.05");
+const DISCOVERY_AMOUNT_FOR_NOTIFY = ton("0.001");
 
-fun loadContractDataToGlobals() {
-    var data: slice = getContractData().beginParse();
-
-    ctxInitialized = data.loadUint(1);
-    ctxNextCallTime = data.loadUint(32);
-    ctxRepeatEvery = data.loadUint(32);
-    ctxSalt = data.loadUint(32);
-    ctxReward = data.loadCoins();
-    ctxOwnerAddress = data.loadAddress();
-    ctxMessage = data.loadRef();
-    ctxInitStateHash = data.loadUint(256);
-    ctxInitStateDepth = data.loadUint(10);
+// Message schemes
+struct (0xd027efe5) CronNotify {
+    initStateHash: uint256
+    initStateDepth: uint10
 }
+struct (0xbbe27821) CronDestroyed
 
-fun storeGlobalsToContractData() {
-    setContractData(beginCell()
-        .storeUint(1, 1)
-        .storeUint(ctxNextCallTime, 32)
-        .storeUint(ctxRepeatEvery, 32)
-        .storeUint(ctxSalt, 32)
-        .storeCoins(ctxReward)
-        .storeSlice(ctxOwnerAddress)
-        .storeRef(ctxMessage)
-        .storeUint(ctxInitStateHash, 256)
-        .storeUint(ctxInitStateDepth, 10)
-    .endCell());
+struct (0x2e41d3ac) CronInit
+struct (0x00000000) OpText { rest: RemainingBitsAndRefs }
+
+type AllowedMessageToCron = CronInit | OpText
+
+struct (0x2114702d) CronTrigger  {
+    rewardAddress: address
+    salt: uint32
 }
+struct (0x2e04891a) CronReward
 
-fun onInternalMessage(msgValue: int, msgFull: cell, msgBody: slice) {
-    var cs = msgFull.beginParse();
-    var flags = cs.loadMessageFlags();
-    var sender: slice = cs.loadAddress();
-    if (isMessageBounced(flags)) {
-        return;
-    }
+type AllowedExternalMessageToCron = CronTrigger
 
-    loadContractDataToGlobals();
-
-    var op: int = msgBody.getRemainingBitsCount() > 0 ? msgBody.loadMessageOp() : 0;
-
-    if (op == OP_INIT) {
-        assert(!ctxInitialized, ERROR_ALREADY_INITIALIZED);
-
-        assert(getMyOriginalBalance() >= MIN_BALANCE_FOR_INIT, ERROR_NOT_ENOUGH_BALANCE_FOR_INIT);
-
-        assert(ctxNextCallTime == 0, ERROR_INIT_NEXT_CALL_TIME_NOT_ZERO);
-        assert(ctxRepeatEvery > 0, ERROR_INIT_REPEAT_EVERY_IS_ZERO);
-        // we check owner address with sender to avoid
-        // external message replacement with owner change attack
-        assert(isSliceBitsEqual(ctxOwnerAddress, sender), ERROR_INIT_SENDER_IS_NOT_OWNER);
-        assert(ctxInitStateHash == 0, ERROR_INIT_STATE_HASH_IS_NOT_ZERO);
-        assert(ctxInitStateDepth == 0, ERROR_INIT_STATE_DEPTH_IS_NOT_ZERO);
-
-        validateTriggerMessage(ctxMessage);
-
-        var data: cell = getContractData();
-        ctxInitStateDepth = data.getCellDepth();
-        ctxInitStateHash = data.cellHash();
-        ctxNextCallTime = now() + ctxRepeatEvery;
-
-        storeGlobalsToContractData();
-
-        // we need it to allow providers to add us back to list when balance is enough for trigger
-        notifyDiscoveryContract();
-
-        return;
-    } else if (op == 0) {
-        if (msgBody.getRemainingBitsCount() == 8*7) {
-            if (isSliceBitsEqual(msgBody.preloadBits(8 * 7), "destroy")) {
-                assert(isSliceBitsEqual(sender, ctxOwnerAddress), ERROR_ACCESS_DENIED);
-
-                notifyDiscoveryContract();
-
-                sendMessage(beginCell()
-                .storeUint(0x10, 6) // non bouncable
-                .storeSlice(ctxOwnerAddress)
-                .storeCoins(0)
-                .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-                .storeUint(OP_DESTROYED, 32)
-                .endCell(), 128 + 32);
-
-                return;
-            }
-        }
-
-        if (msgValue >= MIN_AMOUNT_FOR_NOTIFY) {
-            notifyDiscoveryContract();
-        }
-
-        return;
-    }
-
-    throw ERROR_UNSUPPORTED_OPCODE;
+// Get method reply scheme
+struct CronInfoReply {
+    nextCallTime: int
+    reward: int
+    availableBalance: int
+    repeatEvery: int
 }
 
 @inline
 fun validateTriggerMessage(msg: cell) {
-    // we do it to validate basic message structure to not corrupt a contract,
-    // because we loading coins amount in get method
-    var data: slice = msg.beginParse();
-    var flags: int = data.loadUint(6);
-
-    assert((flags == 0x18) | (flags == 0x10), ERROR_INVALID_MSG_FLAGS);
-    assert(data.loadAddress().getRemainingBitsCount() == 267, ERROR_INVALID_MSG_ADDRESS);
+    // just to avoid failure when running get method (get_cron_info)
+    var data = msg.beginParse();
+    var flags = data.loadUint(6);
+    assert((flags == 0x18) | (flags == 0x10)) throw ERROR_INVALID_MSG_FLAGS;
+    var addr = data.loadAddress();
     data.loadCoins();
 }
 
-fun notifyDiscoveryContract() {
-    // send message to special address, so providers can discover
-    // our contract without scanning whole chain
-    sendMessage(beginCell()
-        .storeUint(0x10, 6) // non bouncable
-        .storeUint(0x400, 11).storeUint(SPECIAL_DISCOVER_ADDR_DATA, 256)
-        .storeCoins(DISCOVERY_AMOUNT_FOR_NOTIFY)
-        .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-        .storeUint(OP_NOTIFY, 32)
-        // we send init data hash to allow contract addr verification without addtional calls
-        .storeUint(ctxInitStateHash, 256)
-        .storeUint(ctxInitStateDepth, 10)
-    .endCell(), 1);
+fun notifyDiscoveryContract(storage: Storage) {
+    // send message to special address for provider discovery
+    val notifyMsg = createMessage({
+        bounce: false,
+        value: DISCOVERY_AMOUNT_FOR_NOTIFY,
+        dest: SPECIAL_DISCOVER_ADDR,
+        body: CronNotify {
+            initStateHash: storage.initStateHash,
+            initStateDepth: storage.initStateDepth
+        }
+    });
+    notifyMsg.send(1);
 }
 
-fun onExternalMessage(msgBody: slice) {
-    loadContractDataToGlobals();
-
-    if ((msgBody.loadMessageOp() == OP_TRIGGER) & (now() >= ctxNextCallTime)) {
-        var rewardAddr: slice = msgBody.loadAddress();
-        // should be std addr of 0 workchain with no anycast
-        assert(rewardAddr.preloadUint(11) == 0x400, ERROR_INVALID_PROVIDER_ADDRESS);
-        msgBody.loadUint(32); // salt for ls to not ignore external
-        msgBody.assertEndOfSlice();
-
-        acceptExternalMessage();
-
-        ctxNextCallTime = now() + ctxRepeatEvery;
-        storeGlobalsToContractData();
-
-        if (ctxReward > 0) {
-            // reward message
-            sendMessage(beginCell()
-                .storeUint(0x10, 6) // non bouncable
-                .storeSlice(rewardAddr)
-                .storeCoins(ctxReward)
-                .storeUint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
-                .storeUint(OP_REWARD, 32)
-                .endCell(), 3);
+fun onInternalMessage(in: InMessage) {
+    val msg = lazy AllowedMessageToCron.fromSlice(in.body);
+    
+    match (msg) {
+        CronInit => {
+            var storage = lazy Storage.load();
+            assert(!storage.initialized) throw ERROR_ALREADY_INITIALIZED;
+            assert(contract.getOriginalBalance() >= MIN_BALANCE_FOR_INIT) throw ERROR_NOT_ENOUGH_BALANCE_FOR_INIT;
+            assert(storage.repeatEvery > 0) throw ERROR_INIT_REPEAT_EVERY_IS_ZERO;
+            assert(in.senderAddress == storage.ownerAddress) throw ERROR_INIT_SENDER_IS_NOT_OWNER;
+            assert(storage.initStateHash == 0) throw ERROR_INIT_STATE_HASH_IS_NOT_ZERO;
+            assert(storage.initStateDepth == 0) throw ERROR_INIT_STATE_DEPTH_IS_NOT_ZERO;
+            
+            validateTriggerMessage(storage.message);
+            
+            var data = contract.getData();
+            storage.initStateDepth = data.depth();
+            storage.initStateHash = data.hash();
+            if (storage.nextCallTime == 0) {
+                storage.nextCallTime = blockchain.now() + storage.repeatEvery;
+            }
+            storage.initialized = true;
+            
+            storage.save();
+            notifyDiscoveryContract(storage);
         }
-
-        // cron message
-        sendMessage(ctxMessage, 3);
+        OpText => {
+            if (msg.rest.bitsEqual("destroy")) {
+                var storage: Storage = lazy Storage.load();
+                assert(in.senderAddress == storage.ownerAddress) throw ERROR_ACCESS_DENIED;
+                notifyDiscoveryContract(storage);
+                val destroyMsg = createMessage({
+                    bounce: false,
+                    value: 0,
+                    dest: storage.ownerAddress,
+                    body: CronDestroyed {}
+                });
+                destroyMsg.send(128 + 32);
+            } else {
+                if (in.valueCoins >= MIN_AMOUNT_FOR_NOTIFY) {
+                    var storage: Storage = lazy Storage.load();
+                    notifyDiscoveryContract(storage);
+                }
+            }
+        }
+        else => {
+            throw ERROR_UNSUPPORTED_OPCODE;
+        }
     }
 }
 
-get get_cron_info(): (int, int, int, int) {
-    loadContractDataToGlobals();
-    var msg: slice = ctxMessage.beginParse().skipBits(6 + 267);
-    var amount: int = msg.loadCoins();
+fun onExternalMessage(msgBody: slice) {
+    val msg = lazy AllowedExternalMessageToCron.fromSlice(msgBody, {
+        throwIfOpcodeDoesNotMatch: ERROR_UNSUPPORTED_OPCODE,
+    });
+    var storage = lazy Storage.load();
+    assert(blockchain.now() >= storage.nextCallTime) throw ERROR_EARLY_TRIGGER;
+    assert(msg.rewardAddress.isInternal() & (msg.rewardAddress.getWorkchain() == 0)) throw ERROR_INVALID_PROVIDER_ADDRESS;
 
-    var balanceMinusAmounts = getMyOriginalBalance() - (amount + ctxReward);
-    return (ctxNextCallTime, ctxReward, balanceMinusAmounts, ctxRepeatEvery);
+    acceptExternalMessage();
+
+    storage.nextCallTime = blockchain.now() + storage.repeatEvery;
+    storage.save();
+    
+    if (storage.reward > 0) {
+        val rewardMsg = createMessage({
+            bounce: false,
+            value: storage.reward,
+            dest: msg.rewardAddress,
+            body: CronReward {}
+        });
+        rewardMsg.send(3);
+    }
+    
+    sendRawMessage(storage.message, 3);
+}
+
+get fun get_cron_info(): CronInfoReply {
+    var storage = lazy Storage.load();
+    var msg = storage.message.beginParse().skipBits(6 + 267);
+    var amount = msg.loadCoins();
+    
+    var balanceMinusAmounts = contract.getOriginalBalance() - (amount + storage.reward);
+    
+    return {
+        nextCallTime: storage.nextCallTime,
+        reward: storage.reward,
+        availableBalance: balanceMinusAmounts,
+        repeatEvery: storage.repeatEvery
+    };
 }
